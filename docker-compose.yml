@@ -1,0 +1,7 @@
+services:
+  filmcraft-web:
+    image: ghcr.io/mikapst/filmcraft-web:latest
+    container_name: filmcraft-web
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
