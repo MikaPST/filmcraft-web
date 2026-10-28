@@ -1,0 +1,142 @@
+name: Build and publish FilmCraft Web
+
+on:
+  schedule:
+    # Weekly rebuild from upstream FilmCraft main (UTC).
+    - cron: "37 4 * * 1"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".dockerignore"
+      - "Dockerfile"
+      - "nginx.conf"
+      - "docker-compose.yml"
+      - "README.md"
+      - ".github/workflows/publish-image.yml"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: filmcraft-web-publish
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@v4
+
+      - name: Check out FilmCraft source
+        uses: actions/checkout@v4
+        with:
+          repository: storytold/filmcraft
+          ref: main
+          path: upstream
+          fetch-depth: 1
+
+      - name: Check out shared font assets
+        uses: actions/checkout@v4
+        with:
+          repository: storytold/craft-fonts
+          ref: main
+          path: craft-fonts
+          fetch-depth: 1
+
+      - name: Record source revisions
+        id: source
+        shell: bash
+        run: |
+          echo "filmcraft_sha=$(git -C upstream rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "filmcraft_short=$(git -C upstream rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          echo "craft_fonts_sha=$(git -C craft-fonts rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust and WebAssembly target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "upstream -> upstream/target"
+
+      - name: Install matching wasm-bindgen CLI
+        shell: bash
+        run: |
+          WASM_BINDGEN_VERSION="$(python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          lock = tomllib.loads(Path("upstream/Cargo.lock").read_text())
+          versions = {
+              pkg["version"]
+              for pkg in lock["package"]
+              if pkg["name"] == "wasm-bindgen"
+          }
+          if not versions:
+              raise SystemExit("No wasm-bindgen package found in upstream/Cargo.lock")
+          def version_key(version):
+              return tuple(int(part) for part in version.split("-")[0].split("."))
+          print(max(versions, key=version_key))
+          PY
+          )"
+          echo "Installing wasm-bindgen-cli ${WASM_BINDGEN_VERSION}"
+          cargo install wasm-bindgen-cli --version "${WASM_BINDGEN_VERSION}" --locked
+
+      - name: Build FilmCraft WebAssembly app
+        shell: bash
+        env:
+          CARGO_BUILD_JOBS: "2"
+          CRAFT_FONTS_REQUIRED: "1"
+        run: |
+          export CRAFT_FONTS_DIR="${GITHUB_WORKSPACE}/craft-fonts"
+          cd upstream
+          cargo xtask web
+
+      - name: Prepare static web assets
+        shell: bash
+        run: |
+          test -f upstream/target/web/dist/index.html
+          mkdir -p dist
+          cp -a upstream/target/web/dist/. dist/
+          test -f dist/index.html
+          test -n "$(find dist -type f -name '*.wasm' -print -quit)"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/mikapst/filmcraft-web
+          tags: |
+            type=raw,value=latest
+            type=raw,value=upstream-${{ steps.source.outputs.filmcraft_short }}
+
+      - name: Build and publish multi-platform image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            FILMCRAFT_COMMIT=${{ steps.source.outputs.filmcraft_sha }}
+            CRAFT_FONTS_COMMIT=${{ steps.source.outputs.craft_fonts_sha }}
