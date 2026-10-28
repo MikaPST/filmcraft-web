@@ -82,8 +82,10 @@ jobs:
           }
           if not versions:
               raise SystemExit("No wasm-bindgen package found in upstream/Cargo.lock")
+
           def version_key(version):
               return tuple(int(part) for part in version.split("-")[0].split("."))
+
           print(max(versions, key=version_key))
           PY
           )"
@@ -128,11 +130,36 @@ jobs:
             type=raw,value=latest
             type=raw,value=upstream-${{ steps.source.outputs.filmcraft_short }}
 
+      - name: Verify Docker build files
+        shell: bash
+        run: |
+          echo "GitHub workspace: $GITHUB_WORKSPACE"
+          echo "Current directory: $(pwd)"
+          echo "Root directory contents:"
+          ls -la "$GITHUB_WORKSPACE"
+
+          test -f "$GITHUB_WORKSPACE/Dockerfile" || {
+            echo "::error::Dockerfile missing from repository root"
+            exit 1
+          }
+
+          test -f "$GITHUB_WORKSPACE/nginx.conf" || {
+            echo "::error::nginx.conf missing from repository root"
+            exit 1
+          }
+
+          test -f "$GITHUB_WORKSPACE/dist/index.html" || {
+            echo "::error::dist/index.html missing"
+            exit 1
+          }
+
+          echo "Docker build files verified."
+
       - name: Build and publish multi-platform image
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ github.workspace }}
+          file: ${{ github.workspace }}/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
