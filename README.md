@@ -25,7 +25,7 @@
 
 ## Why this repository?
 
-The upstream FilmCraft project provides a WebAssembly build that can be served as a static website. This repository automates building that web application from upstream source and packages the generated files into a small NGINX-based Docker image.
+The upstream FilmCraft project provides a WebAssembly build that can be served as a static website. This repository automates building that web application from upstream source and packages the generated files into a lightweight NGINX-based Docker image.
 
 The goals are to:
 
@@ -35,14 +35,14 @@ The goals are to:
 - Provide a simple image that can later be offered through Unraid Community Applications.
 - Keep this packaging project separate from the upstream FilmCraft source code.
 
-This is an independent community packaging project. It is **not an official FilmCraft release** and is not affiliated with or endorsed by the PhotoCraft or ArtCraft maintainers.
+This is an independent community packaging project. It is **not an official FilmCraft release** and is not affiliated with or endorsed by the FilmCraft or ArtCraft maintainers.
 
 ## How it works
 
 FilmCraft's web application runs in the browser using WebAssembly. The container serves the compiled static web files through NGINX; it does not run a remote desktop.
 
-- **Browser-based editor:** use FilmCraft through a modern browser.
-- **Local media:** media files are handled by the browser application and are not uploaded to this container as a document-storage service.
+- **Browser-based editor:** use FilmCraft through a compatible modern browser.
+- **Local media processing:** media is handled by the browser application on the user's device. FilmCraft may also use browser storage, including OPFS, for application data and recovery-related functionality; this container is not a remote media-processing or document-storage service.
 - **No remote desktop:** no VNC session or Linux graphical desktop is required.
 - **Self-hosted:** run the web app on your own server and access it over your local network or through a properly configured reverse proxy.
 
@@ -112,15 +112,15 @@ No `.env` file or persistent volume is required for the default configuration. T
 
 ### Reverse proxy and browser requirements
 
-The NGINX configuration:
+The image's NGINX configuration is generated as part of the GitHub Actions build. It is configured to:
 
-- serves `.wasm` files with the `application/wasm` MIME type;
-- sends `Cross-Origin-Opener-Policy: same-origin`;
-- sends `Cross-Origin-Embedder-Policy: require-corp`.
+- serve `.wasm` files with the `application/wasm` MIME type;
+- send `Cross-Origin-Opener-Policy: same-origin`;
+- send `Cross-Origin-Embedder-Policy: require-corp`.
 
-These headers provide the cross-origin isolation expected by the upstream web hosting guidance. If you expose the application outside your local network, use HTTPS through a reverse proxy such as Traefik and avoid exposing plain HTTP directly to the public Internet.
+The COOP and COEP headers provide cross-origin isolation for browser features that may require it. They are part of the web-serving configuration; browser compatibility can still depend on the browser, GPU, operating system and media being edited.
 
-FilmCraft's browser build uses WebGPU with a WebGL2 fallback. Compatibility and performance depend on the browser, GPU and media being edited.
+If you expose the application outside your local network, use HTTPS through a reverse proxy such as Traefik and avoid exposing plain HTTP directly to the public Internet. WebGPU generally requires a secure context (HTTPS, or localhost). FilmCraft also provides a WebGL2 fallback; actual performance and available features depend on the browser and hardware.
 
 ## Automated builds
 
@@ -130,7 +130,7 @@ GitHub Actions builds the FilmCraft web application and publishes the container 
 |---|---|
 | Weekly schedule | Checks out the current upstream `main` branch, builds the WebAssembly app and publishes a new image when the build succeeds |
 | Manual workflow dispatch | Allows a build to be started manually from the Actions tab |
-| Changes to this repository's build files | Runs the workflow after changes to the Dockerfile, NGINX configuration, workflow or README on `main` |
+| Changes to packaging files | Runs the workflow when the repository files configured in the workflow's `push.paths` filter are changed on `main` |
 
 ### Published tags
 
@@ -149,11 +149,25 @@ The workflow:
 
 1. Checks out this repository.
 2. Checks out FilmCraft and the shared `craft-fonts` repository.
-3. Installs the Rust WebAssembly target and the matching `wasm-bindgen-cli` version from FilmCraft's lockfile.
-4. Runs `cargo xtask web` to generate `upstream/target/web/dist`.
+3. Installs the Rust WebAssembly target and the `wasm-bindgen-cli` version required by the upstream project (`0.2.129`).
+4. Runs `cargo xtask web` to generate the web build in `upstream/target/web/dist`.
 5. Packages the generated static site into an NGINX image and publishes it to GHCR.
 
-The Dockerfile expects the generated `dist/` folder created by the workflow. The repository is primarily intended as an automated image-build and publication pipeline; the normal way to consume it is to pull the published image.
+The workflow supplies the generated web files as the Docker build context and defines the Dockerfile and NGINX configuration inline during the image build. Separate `Dockerfile`, `nginx.conf` and `.dockerignore` files are therefore not required in this packaging repository.
+
+The repository is primarily intended as an automated image-build and publication pipeline; the normal way to consume it is to pull the published image.
+
+## Unraid Community Applications
+
+This image is intended to be usable on Unraid.
+
+An Unraid Community Applications template will be added after the image build and runtime configuration have been tested and validated.
+
+In the meantime, FilmCraft Web can be deployed on Unraid using the Docker Compose configuration above or by configuring the container manually with:
+
+- **Repository:** `ghcr.io/mikapst/filmcraft-web:latest`
+- **Container port:** `8080`
+- **Host port:** `8080` by default
 
 ## Upstream project and attribution
 
@@ -163,6 +177,14 @@ The Dockerfile expects the generated `dist/` folder created by the workflow. The
 - **Shared font assets:** [storytold/craft-fonts](https://github.com/storytold/craft-fonts)
 - **Official releases:** [FilmCraft releases](https://github.com/storytold/filmcraft/releases)
 
-FilmCraft is open source and is dual-licensed under the MIT License or Apache License 2.0, at the user's option. Fonts included from `craft-fonts` have their own licenses and attribution notices; consult the upstream repositories for details. FilmCraft names, artwork and logos remain subject to the upstream project's trademark and usage terms.
+FilmCraft's source code is dual-licensed under the MIT License or Apache License 2.0, at the user's option, as specified by the upstream project. The `craft-fonts` assets have their own licensing and attribution requirements; consult that repository for the applicable notices.
 
-The license for the upstream application does not automatically determine the license of the packaging files maintained in this repository. Select and include a separate `LICENSE` for this repository's own files before publishing if you want to grant reuse rights.
+The license of the upstream application and its assets does not automatically determine the license of the packaging files maintained in this repository. If you want to grant reuse rights for your own workflow, Compose file and documentation, select and include a separate `LICENSE` for this repository.
+
+FilmCraft names, artwork and logos remain subject to the upstream project's trademark and usage terms.
+
+## Disclaimer
+
+This repository is maintained independently and is not affiliated with, sponsored by or endorsed by the FilmCraft project or its maintainers.
+
+FilmCraft is alpha software. Use it at your own risk and keep independent backups of important media and project files.
