@@ -19,6 +19,9 @@
   <a href="https://ghcr.io/mikapst/filmcraft-web">
     <img src="https://ghcr-badge.egpl.dev/mikapst/filmcraft-web/latest_tag?trim=major&label=GHCR" alt="GHCR image tag">
   </a>
+    <a href="docker-compose.yml">
+    <img src="https://img.shields.io/badge/Docker%20Compose-ready-2496ED?logo=docker&logoColor=white" alt="Docker Compose configuration">
+  </a>
 </p>
 
 ---
