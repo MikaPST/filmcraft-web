@@ -3,7 +3,7 @@ name: Build and publish FilmCraft Web
 on:
   schedule:
     # Weekly rebuild from upstream FilmCraft main (UTC).
-    - cron: "37 4 * * 1"
+    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       upstream_tag:
