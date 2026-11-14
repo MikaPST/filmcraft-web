@@ -29,29 +29,76 @@
 
 ## Why this repository?
 
-The upstream FilmCraft project provides a WebAssembly build that can be served as a static website. This repository automates building that web application from upstream source and packages the generated files into a lightweight NGINX-based Docker image.
+The upstream FilmCraft project provides a WebAssembly build that can be served as a static website. This repository builds the official upstream release and packages the generated site into a lightweight NGINX Docker image.
 
 The goals are to:
 
-- Publish a matching GitHub Release only after the Docker build and push succeed.
 - Build the WebAssembly application from official release tags in [storytold/filmcraft](https://github.com/storytold/filmcraft).
-- Include the shared font assets from [storytold/craft-fonts](https://github.com/storytold/craft-fonts).
-- Check weekly for new official releases and publish a versioned image to GHCR.
-- Provide Docker deployment for Unraid Community Applications.
-- Keep this packaging project separate from the upstream FilmCraft source code.
+- Include shared font assets from [storytold/craft-fonts](https://github.com/storytold/craft-fonts).
+- Publish multi-platform Docker images to GHCR for `linux/amd64` and `linux/arm64`.
+- Create a matching GitHub Release **only after** the image has been published successfully.
+- Check daily for new official releases and support manual and packaging-triggered rebuilds.
+- Provide a straightforward deployment for Docker Compose and Unraid Community Applications.
+- Maintain independent, version-controlled `Dockerfile`, `nginx.conf` and `.dockerignore` files without modifying upstream source.
 
 This is an independent community packaging project. It is **not an official FilmCraft release** and is not affiliated with or endorsed by the FilmCraft or ArtCraft maintainers.
 
 ## How it works
 
-FilmCraft's web application runs in the browser using WebAssembly. The container serves the compiled static web files through NGINX; it does not run a remote desktop.
+FilmCraft runs its video-editing engine and graphical interface in the browser using WebAssembly. NGINX serves compiled static files; the container is not a remote desktop, transcoding server or shared media library.
 
-- **Browser-based editor:** use FilmCraft through a compatible modern browser.
-- **Local media processing:** media is handled by the browser application on the user's device. FilmCraft may also use browser storage, including OPFS, for application data and recovery-related functionality; this container is not a remote media-processing or document-storage service.
-- **No remote desktop:** no VNC session or Linux graphical desktop is required.
-- **Self-hosted:** run the web app on your own server and access it over your local network or through a properly configured reverse proxy.
+- **Browser-based editor:** the interface runs in a compatible modern browser.
+- **Local media processing:** media stays on the user's machine; the browser may use local storage, including OPFS, for recovery and imported media.
+- **No remote desktop:** no VNC or Linux graphical desktop is required.
+- **Self-hosted:** serve the web app from your server and access it locally or through an HTTPS reverse proxy.
+- **GPU compatibility:** WebGPU is preferred when available, with a WebGL2 fallback; actual capabilities depend on browser and hardware.
 
-FilmCraft is in **alpha** and is under active development. Features, compatibility and behaviour may change between upstream builds. Test updates before relying on the application for important projects.
+FilmCraft is **alpha software**. Test upgrades before relying on the application for important projects.
+
+## Repository structure
+
+```text
+filmcraft-web/
+├── .github/
+│   └── workflows/
+│       └── publish-image.yml
+├── .dockerignore
+├── Dockerfile
+├── nginx.conf
+├── docker-compose.yml
+└── README.md
+```
+
+| File | Purpose |
+|---|---|
+| `.github/workflows/publish-image.yml` | Detects releases, builds the official WebAssembly app, publishes the image and creates GitHub Releases |
+| `Dockerfile` | Version-controlled NGINX runtime image definition |
+| `nginx.conf` | WebAssembly MIME type, COOP/COEP headers, cache policy and health endpoint |
+| `.dockerignore` | Keeps the Docker build context limited to the compiled site and NGINX configuration |
+| `docker-compose.yml` | Ready-to-use deployment |
+| `README.md` | Documentation for the image, architecture and maintenance |
+
+### Docker build architecture
+
+The GitHub Actions workflow keeps the packaging and upstream sources separate:
+
+```text
+GitHub Actions workspace/
+├── packaging/           # MikaPST/filmcraft-web
+│   ├── Dockerfile
+│   ├── nginx.conf
+│   └── .dockerignore
+├── upstream/            # storytold/filmcraft (official release tag)
+├── craft-fonts/         # storytold/craft-fonts (main)
+└── docker-build/        # temporary Docker context
+    ├── .dockerignore
+    ├── nginx.conf
+    └── dist/            # upstream/target/web/dist
+```
+
+The official application is compiled using **`cargo xtask web`**, not Trunk. The workflow installs `wasm32-unknown-unknown`, reads the matching `wasm-bindgen` version from the upstream `Cargo.lock`, and provides `CRAFT_FONTS_DIR` during compilation. The resulting `target/web/dist/` files include the HTML entry point, JavaScript glue, WebAssembly module and supporting browser assets (including the audio worklet).
+
+After compilation, the workflow copies the generated site into a temporary Docker context and uses the **versioned** root `Dockerfile` and `nginx.conf` from this repository. The final image serves the site on port `8080` with NGINX. It does not require Rust or build tools at runtime.
 
 ## Docker image
 
@@ -61,17 +108,17 @@ The published image is:
 ghcr.io/mikapst/filmcraft-web:latest
 ```
 
-Each official upstream release is also published under its exact version tag, for example:
+Versioned images follow the official upstream release tags:
 
 ```text
-ghcr.io/mikapst/filmcraft-web:vX.Y.Z
+ghcr.io/mikapst/filmcraft-web:<upstream-version>
 ```
 
-Use a versioned tag if you want to keep a deployment on a specific release. The `latest` tag updates when an image is published.
+Use a versioned tag to keep a deployment on a specific release. `latest` is mutable.
 
-### Quick start with Docker Compose
+### Option 1 — Docker Compose
 
-A `docker-compose.yml` file is provided at the repository root:
+The repository includes a `docker-compose.yml` file:
 
 ```yaml
 services:
@@ -83,21 +130,26 @@ services:
     restart: unless-stopped
 ```
 
-Start FilmCraft Web from the repository directory:
+Start the container:
 
 ```bash
 docker compose up -d
 ```
 
-Then open:
+Open `http://YOUR_SERVER_IP:8080`, or `http://localhost:8080` when using the same computer.
 
-```text
-http://YOUR_SERVER_IP:8080
+Useful commands:
+
+```bash
+docker compose logs -f
+docker compose pull
+docker compose up -d
+docker compose down
 ```
 
-Replace `YOUR_SERVER_IP` with the IP address or hostname of your server. On the same computer, use `http://localhost:8080`.
+No `.env` file or persistent volume is required for the default configuration. To change the host port, change the left-hand side of the mapping, for example `8081:8080`.
 
-### Run directly with Docker
+### Option 2 — Run directly with Docker
 
 ```bash
 docker run -d \
@@ -107,109 +159,90 @@ docker run -d \
   ghcr.io/mikapst/filmcraft-web:latest
 ```
 
-### Useful commands
+## Network access and reverse proxies
 
-```bash
-# View logs
-docker compose logs -f
+NGINX listens on **port 8080** and serves `.wasm` as `application/wasm`. The configuration sends:
 
-# Pull the latest image and recreate the container
-docker compose pull
-docker compose up -d
+- `Cross-Origin-Opener-Policy: same-origin`
+- `Cross-Origin-Embedder-Policy: require-corp`
 
-# Stop and remove the container
-docker compose down
-```
+These headers support cross-origin isolation required by some browser features. If you deploy behind Traefik, NGINX Proxy Manager or another reverse proxy, preserve these headers and use **HTTPS** for access outside localhost. WebGPU typically requires a secure browser context.
 
-No `.env` file or persistent volume is required for the default configuration. The host port is `8080`; to use a different host port, change the left-hand side of the port mapping, for example `8081:8080`.
-
-### Reverse proxy and browser requirements
-
-The image's NGINX configuration is generated as part of the GitHub Actions build. It is configured to:
-
-- serve `.wasm` files with the `application/wasm` MIME type;
-- send `Cross-Origin-Opener-Policy: same-origin`;
-- send `Cross-Origin-Embedder-Policy: require-corp`.
-
-The COOP and COEP headers provide cross-origin isolation for browser features that may require it. They are part of the web-serving configuration; browser compatibility can still depend on the browser, GPU, operating system and media being edited.
-
-If you expose the application outside your local network, use HTTPS through a reverse proxy such as Traefik and avoid exposing plain HTTP directly to the public Internet. WebGPU generally requires a secure context (HTTPS, or localhost). FilmCraft also provides a WebGL2 fallback; actual performance and available features depend on the browser and hardware.
+The image also provides a lightweight `GET /health` endpoint for container health checks. The HTML entry point is configured not to be cached; static assets are cached for longer periods. Browser compatibility and performance still depend on the client.
 
 ## Automated builds
 
-GitHub Actions checks the official [FilmCraft releases](https://github.com/storytold/filmcraft/releases), builds the WebAssembly application from the selected upstream tag and publishes the image to GHCR.
+GitHub Actions checks the official [FilmCraft releases](https://github.com/storytold/filmcraft/releases), compiles the selected upstream tag, builds a multi-platform NGINX image and publishes it to GHCR.
 
 | Trigger | Behaviour |
 |---|---|
-| Weekly schedule | Checks the latest official FilmCraft release and builds it if it has not already been published here |
-| Manual workflow dispatch | Builds the latest official release, or a specified `upstream_tag` |
-| Force rebuild | Rebuilds an already published version with `force_rebuild: true` |
-| Changes to packaging files on `main` | Rebuilds the current official upstream release with the updated workflow |
+| Daily schedule (03:17 UTC) | Checks for a new official FilmCraft release |
+| Manual workflow dispatch | Builds the latest official release or the specified `upstream_tag` |
+| Force rebuild | Rebuilds an already published release with `force_rebuild: true` |
+| Packaging changes on `main` | Rebuilds the latest official release with updated packaging |
 
 ### Published tags
 
-- `latest` — the latest successfully published image (mutable tag).
-- `<upstream-version>` — the exact official upstream tag, for example `vX.Y.Z`.
-- `upstream-<commit>` — the upstream source commit used for the image (first 12 hexadecimal characters).
+- `latest` — latest successfully published image.
+- `<upstream-version>` — exact official release tag.
+- `upstream-<commit>` — first 12 characters of the FilmCraft source commit.
 
-The image targets both `linux/amd64` and `linux/arm64`. The workflow checks out **the official upstream release tag**, rather than compiling `main` as the versioned source.
+Both `linux/amd64` and `linux/arm64` are published. The workflow checks out the **official release tag**, not the upstream development branch.
 
 ### GitHub Releases
 
-After a successful Docker build and GHCR push, the workflow creates or updates a [GitHub Release](https://github.com/MikaPST/filmcraft-web/releases) matching the upstream tag. It includes the upstream release notes, source link and commit, Docker tags, supported architectures and (when available) the published image digest.
+After a successful Docker build and GHCR push, the workflow creates or updates a [GitHub Release](https://github.com/MikaPST/filmcraft-web/releases) matching the upstream version. The release includes source information, the shared fonts revision, supported architectures, Docker tags, image digest and upstream release notes.
 
-The Release badge at the top of this README updates automatically. Scheduled runs skip versions already released here. You can force a rebuild from **Actions → Build and publish FilmCraft Web → Run workflow**.
+Scheduled runs skip already published versions. A packaging change or manual force rebuild republishes the selected release.
 
 > [!IMPORTANT]
-> A GitHub Release is created only after the Docker image has been successfully published. The `latest` tag may change after a rebuild; pin a versioned image tag for a stable deployment. Auxiliary source repositories (for example `craft-fonts`) may be checked out separately and are not necessarily pinned to the upstream release commit.
+> GitHub Releases are created **only after** the image has been pushed successfully. The `craft-fonts` checkout currently follows its `main` branch independently from the FilmCraft release tag; its exact commit is recorded in the image metadata and GitHub Release.
 
 ### Build pipeline
 
-The workflow:
+1. Checkout the packaging repository into `packaging/`.
+2. Resolve the official FilmCraft release and skip it if already published (unless forced).
+3. Checkout the official FilmCraft source into `upstream/` and shared fonts into `craft-fonts/`.
+4. Install Rust, the WebAssembly target and the upstream-compatible `wasm-bindgen-cli`.
+5. Run `cargo xtask web` to build `upstream/target/web/dist/`.
+6. Copy the compiled site and versioned NGINX configuration into `docker-build/`.
+7. Build and push `linux/amd64` and `linux/arm64` images using the root `Dockerfile`.
+8. Create or update the matching GitHub Release.
 
-1. Checks out this repository.
-2. Checks out FilmCraft and the shared `craft-fonts` repository.
-3. Installs the Rust WebAssembly target and the `wasm-bindgen-cli` version required by the upstream project (`0.2.129`).
-4. Runs `cargo xtask web` to generate the web build in `upstream/target/web/dist`.
-5. Packages the generated static site into an NGINX image and publishes it to GHCR.
-
-The workflow supplies the generated web files as the Docker build context and defines the Dockerfile and NGINX configuration inline during the image build. Separate `Dockerfile`, `nginx.conf` and `.dockerignore` files are therefore not required in this packaging repository.
-
-The repository is primarily intended as an automated image-build and publication pipeline; the normal way to consume it is to pull the published image.
+The Dockerfile, NGINX configuration and ignore rules are maintained **in this repository**, not generated inline by the workflow.
 
 ## Unraid Community Applications
 
-This image can be deployed on Unraid.
-
-The Unraid Community Applications template is maintained in [MikaPST/unraid-community-apps](https://github.com/MikaPST/unraid-community-apps), separately from this image-build repository.
-
-In the meantime, FilmCraft Web can be deployed on Unraid using the Docker Compose configuration above or by configuring the container manually with:
+FilmCraft Web can be deployed on Unraid through Docker or the Unraid Community Applications template maintained in [MikaPST/unraid-community-apps](https://github.com/MikaPST/unraid-community-apps).
 
 - **Repository:** `ghcr.io/mikapst/filmcraft-web:latest`
 - **Container port:** `8080`
-- **Host port:** `8080` by default
+- **Default host port:** `8080`
 - **Template:** [filmcraft-web.xml](https://github.com/MikaPST/unraid-community-apps/blob/main/templates/filmcraft-web.xml)
+
+The Unraid template is maintained separately from this image-build repository.
 
 ## Upstream project
 
-- **FilmCraft source code:** [storytold/filmcraft](https://github.com/storytold/filmcraft)
-- **FilmCraft web build instructions:** [docs/web.md](https://github.com/storytold/filmcraft/blob/main/docs/web.md)
-- **FilmCraft contribution and font-build instructions:** [docs/contributing.md](https://github.com/storytold/filmcraft/blob/main/docs/contributing.md)
-- **Shared font assets:** [storytold/craft-fonts](https://github.com/storytold/craft-fonts)
+- **Official source:** [storytold/filmcraft](https://github.com/storytold/filmcraft)
+- **Web build instructions:** [docs/web.md](https://github.com/storytold/filmcraft/blob/main/docs/web.md)
+- **Web hosting instructions:** [packaging/web/README.md](https://github.com/storytold/filmcraft/blob/main/packaging/web/README.md)
+- **Contribution and font instructions:** [docs/contributing.md](https://github.com/storytold/filmcraft/blob/main/docs/contributing.md)
+- **Shared fonts:** [storytold/craft-fonts](https://github.com/storytold/craft-fonts)
 - **Official releases:** [FilmCraft releases](https://github.com/storytold/filmcraft/releases)
 
-The MikaPST GitHub Release tracks the upstream version but represents independent Docker packaging, not an official FilmCraft distribution.
+The MikaPST release tracks the official FilmCraft version but represents independent Docker packaging.
 
 ## License and attribution
 
-FilmCraft's source code is dual-licensed under the MIT License or Apache License 2.0, at the user's option, as specified by the upstream project. The `craft-fonts` assets have their own licensing and attribution requirements; consult that repository for the applicable notices.
+FilmCraft source code is dual-licensed under MIT or Apache License 2.0, at the user's option, as specified by the upstream project. Shared `craft-fonts` assets have their own licensing and attribution requirements; consult the corresponding repositories for details.
 
-The license of the upstream application and its assets does not automatically determine the license of the packaging files maintained in this repository. If you want to grant reuse rights for your own workflow, Compose file and documentation, select and include a separate `LICENSE` for this repository.
+The upstream application's license does not automatically determine the license of the packaging files maintained here. Include an appropriate `LICENSE` file if you wish to explicitly license this repository's original packaging materials.
 
-FilmCraft names, artwork and logos remain subject to the upstream project's trademark and usage terms.
+FilmCraft names, artwork and logos remain subject to upstream project terms.
 
 ## Disclaimer
 
-This repository is maintained independently and is not affiliated with, sponsored by or endorsed by the FilmCraft project or its maintainers.
+This repository is independently maintained and is not affiliated with, sponsored by or endorsed by FilmCraft or its maintainers.
 
 FilmCraft is alpha software. Use it at your own risk and keep independent backups of important media and project files.
