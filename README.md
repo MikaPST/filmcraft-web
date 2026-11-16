@@ -53,7 +53,7 @@ FilmCraft runs its video-editing engine and graphical interface in the browser u
 - **Self-hosted:** serve the web app from your server and access it locally or through an HTTPS reverse proxy.
 - **GPU compatibility:** WebGPU is preferred when available, with a WebGL2 fallback; actual capabilities depend on browser and hardware.
 
-FilmCraft is **alpha software**. Test upgrades before relying on the application for important projects.
+FilmCraft is **alpha software**. Test upgrades before relying on the application for important projects. Because the editor runs in the browser, maintain independent backups of important project files and media.
 
 ## Repository structure
 
@@ -102,7 +102,7 @@ After compilation, the workflow copies the generated site into a temporary Docke
 
 ## Docker image
 
-The published image is:
+The image is published to GitHub Container Registry:
 
 ```text
 ghcr.io/mikapst/filmcraft-web:latest
@@ -116,7 +116,7 @@ ghcr.io/mikapst/filmcraft-web:<upstream-version>
 
 Use a versioned tag to keep a deployment on a specific release. `latest` is mutable.
 
-### Option 1 — Docker Compose
+### Option 1 — Docker Compose (recommended)
 
 The repository includes a `docker-compose.yml` file:
 
@@ -138,12 +138,17 @@ docker compose up -d
 
 Open `http://YOUR_SERVER_IP:8080`, or `http://localhost:8080` when using the same computer.
 
-Useful commands:
+#### Useful Compose commands
 
 ```bash
+# View container logs
 docker compose logs -f
+
+# Pull the latest image and recreate the container
 docker compose pull
 docker compose up -d
+
+# Stop and remove the container
 docker compose down
 ```
 
@@ -152,6 +157,9 @@ No `.env` file or persistent volume is required for the default configuration. T
 ### Option 2 — Run directly with Docker
 
 ```bash
+docker pull ghcr.io/mikapst/filmcraft-web:latest
+
+
 docker run -d \
   --name filmcraft-web \
   --restart unless-stopped \
@@ -191,12 +199,17 @@ Both `linux/amd64` and `linux/arm64` are published. The workflow checks out the 
 
 ### GitHub Releases
 
-After a successful Docker build and GHCR push, the workflow creates or updates a [GitHub Release](https://github.com/MikaPST/filmcraft-web/releases) matching the upstream version. The release includes source information, the shared fonts revision, supported architectures, Docker tags, image digest and upstream release notes.
+After a successful Docker build and GHCR push, the workflow creates or updates a [GitHub Release](https://github.com/MikaPST/filmcraft-web/releases) matching the official upstream tag. Each release includes:
 
-Scheduled runs skip already published versions. A packaging change or manual force rebuild republishes the selected release.
+- The official FilmCraft release notes and a link to the upstream release.
+- The upstream FilmCraft source commit and the separately checked-out `craft-fonts` revision.
+- The published GHCR image tags and supported architectures (`linux/amd64` and `linux/arm64`).
+- The published Docker image digest, when available.
+
+The **Release** badge at the top of this README reflects the releases published in this packaging repository. Scheduled runs skip versions that already have a release here. A change to packaging files triggers a rebuild of the latest upstream version; you can also request a rebuild from **Actions → Build and publish FilmCraft Web → Run workflow**, using `force_rebuild` when necessary.
 
 > [!IMPORTANT]
-> GitHub Releases are created **only after** the image has been pushed successfully. The `craft-fonts` checkout currently follows its `main` branch independently from the FilmCraft release tag; its exact commit is recorded in the image metadata and GitHub Release.
+> A GitHub Release is created **only after** the Docker image has been successfully published. The `latest` tag can change after a rebuild; pin a versioned image tag for a more stable deployment. The `craft-fonts` checkout follows its `main` branch independently of the FilmCraft release tag, so rebuilding the same FilmCraft version can incorporate different font assets. The recorded fonts commit helps identify the exact source used.
 
 ### Build pipeline
 
